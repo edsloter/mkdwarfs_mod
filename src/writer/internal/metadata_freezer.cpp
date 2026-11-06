@@ -1,0 +1,141 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * dwarfs is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * dwarfs is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with dwarfs.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <algorithm>
+#include <numeric>
+#include <sstream>
+#include <tuple>
+
+#include <thrift/lib/cpp2/frozen/FrozenUtil.h>
+
+#include <dwarfs/logger.h>
+#include <dwarfs/malloc_byte_buffer.h>
+#include <dwarfs/util.h>
+
+#include <dwarfs/writer/internal/metadata_freezer.h>
+
+#include <dwarfs/gen-cpp-lite/metadata_layouts.h>
+#include <dwarfs/gen-cpp-lite/metadata_types.h>
+
+#include <thrift/lib/thrift/gen-cpp-lite/frozen_types.h>
+
+namespace dwarfs::writer::internal {
+
+namespace {
+
+template <typename T>
+std::size_t size_in_bytes(T const& x) {
+  if constexpr (requires { x.size_in_bytes(); }) {
+    return x.size_in_bytes();
+  } else {
+    return sizeof(typename T::value_type) * x.size();
+  }
+}
+
+std::string metadata_memory_usage(thrift::metadata::metadata const& data) {
+  std::ostringstream oss;
+
+  std::vector<std::tuple<std::string_view, std::size_t, std::size_t>> sizes;
+
+  sizes.emplace_back("chunks", data.chunks()->size(),
+                     size_in_bytes(data.chunks().value()));
+  sizes.emplace_back("directories", data.directories()->size(),
+                     size_in_bytes(data.directories().value()));
+  sizes.emplace_back("inodes", data.inodes()->size(),
+                     size_in_bytes(data.inodes().value()));
+  sizes.emplace_back("chunk_table", data.chunk_table()->size(),
+                     size_in_bytes(data.chunk_table().value()));
+  sizes.emplace_back("dir_entries", data.dir_entries()->size(),
+                     size_in_bytes(data.dir_entries().value()));
+
+  auto const total_bytes = std::accumulate(
+      sizes.begin(), sizes.end(), 0ULL,
+      [](std::size_t acc, auto const& t) { return acc + std::get<2>(t); });
+
+  oss << "metadata memory usage (" << size_with_unit(total_bytes) << "):\n";
+
+  for (auto const& [label, count, total_size] : sizes) {
+    if (count > 0) {
+      oss << "  " << count << " " << label << ": " << size_with_unit(total_size)
+          << "\n";
+    }
+  }
+
+  return oss.str();
+}
+
+template <class T>
+std::pair<shared_byte_buffer, shared_byte_buffer> freeze_to_buffer(T const& x) {
+  using namespace ::apache::thrift::frozen;
+
+  Layout<T> layout;
+  size_t content_size = LayoutRoot::layout(x, layout);
+
+  std::string schema;
+  serializeRootLayout(layout, schema);
+
+  auto schema_buffer = malloc_byte_buffer::create(schema);
+
+  auto data_buffer = malloc_byte_buffer::create_zeroed(content_size);
+
+  std::span<uint8_t> content_range(data_buffer.data(), data_buffer.size());
+  ByteRangeFreezer::freeze(layout, x, content_range);
+
+  data_buffer.resize(data_buffer.size() - content_range.size());
+  data_buffer.shrink_to_fit();
+
+  return {schema_buffer.share(), data_buffer.share()};
+}
+
+template <typename LoggerPolicy>
+class metadata_freezer_ : public metadata_freezer::impl {
+ public:
+  explicit metadata_freezer_(logger& lgr)
+      : LOG_PROXY_INIT(lgr) {}
+
+  std::pair<shared_byte_buffer, shared_byte_buffer>
+  freeze(thrift::metadata::metadata const& data) const override {
+    LOG_VERBOSE << metadata_memory_usage(data);
+
+    auto ti = LOG_TIMED_VERBOSE;
+    auto rv = freeze_to_buffer(data);
+
+    ti << "freezing metadata to " << rv.second.size() << " bytes...";
+
+    return rv;
+  }
+
+ private:
+  LOG_PROXY_DECL(LoggerPolicy);
+};
+
+} // namespace
+
+metadata_freezer::metadata_freezer(logger& lgr)
+    : impl_{
+          make_unique_logging_object<impl, metadata_freezer_, logger_policies>(
+              lgr)} {}
+
+metadata_freezer::~metadata_freezer() = default;
+
+} // namespace dwarfs::writer::internal

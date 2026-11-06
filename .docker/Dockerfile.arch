@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+
+# SPDX-FileCopyrightText: Copyright (c) Marcus Holland-Moritz
+# SPDX-License-Identifier: MIT
+
+FROM archlinux:latest@sha256:d0adc0bcc3bdfeacf9f30abd853c8d4d1dd40b6363e17cc158312a40423e063b
+RUN pacman -Syu --noconfirm
+RUN pacman -S --noconfirm --needed \
+        bash-completion \
+        vim \
+        devtools \
+        less
+RUN pacman -S --noconfirm --needed \
+        gcc \
+        clang \
+        man \
+        git \
+        zstd \
+        ccache \
+        ninja \
+        cmake \
+        make \
+        bison \
+        bubblewrap \
+        flex \
+        ruby-ronn \
+        python-mistletoe \
+        fuse \
+        fuse3 \
+        pkg-config \
+        binutils \
+        libarchive \
+        benchmark \
+        boost \
+        boost-libs \
+        brotli \
+        openssl \
+        fmt \
+        range-v3 \
+        nlohmann-json \
+        jemalloc \
+        lz4 \
+        xz \
+        xxhash \
+        libunwind \
+        libdwarf \
+        flac \
+        utf8cpp
+RUN useradd -g users -u 1000 -m mhx
+USER mhx
+ENTRYPOINT /workspace/.docker/build-linux.sh

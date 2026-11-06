@@ -1,0 +1,100 @@
+#
+# Copyright (c) Marcus Holland-Moritz
+#
+# This file is part of dwarfs.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# SPDX-License-Identifier: MIT
+#
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+set_and_check(DWARFS_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(DWARFS_CMAKE_DIR "@PACKAGE_DWARFS_CMAKE_INSTALL_DIR@")
+
+set(DWARFS_PREFIX_DIR "${PACKAGE_PREFIX_DIR}")
+
+find_dependency(Threads REQUIRED)
+find_dependency(fmt CONFIG REQUIRED)
+find_dependency(Boost @BOOST_REQUIRED_VERSION@ REQUIRED CONFIG
+                COMPONENTS chrono filesystem program_options
+                OPTIONAL_COMPONENTS process)
+
+set(LIBDWARFS_WITH_CPPTRACE @cpptrace_FOUND@)
+
+if(LIBDWARFS_WITH_CPPTRACE)
+  find_dependency(cpptrace CONFIG REQUIRED)
+endif()
+
+if(NOT "@BUILD_SHARED_LIBS@")
+  find_package(PkgConfig)
+
+  if(@APPLE@ AND @USE_HOMEBREW_LIBARCHIVE@) # APPLE AND USE_HOMEBREW_LIBARCHIVE
+    find_program(HOMEBREW_EXE NAMES brew)
+    execute_process(
+      COMMAND ${HOMEBREW_EXE} --prefix libarchive
+      OUTPUT_VARIABLE LIBARCHIVE_PREFIX
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    list(PREPEND CMAKE_PREFIX_PATH ${LIBARCHIVE_PREFIX})
+  endif()
+
+  pkg_check_modules(LIBCRYPTO REQUIRED IMPORTED_TARGET libcrypto>=@LIBCRYPTO_REQUIRED_VERSION@)
+  pkg_check_modules(LIBARCHIVE REQUIRED IMPORTED_TARGET libarchive>=@LIBARCHIVE_REQUIRED_VERSION@)
+  pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash>=@XXHASH_REQUIRED_VERSION@)
+  pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd>=@ZSTD_REQUIRED_VERSION@)
+
+  add_library(zstd::preferred INTERFACE IMPORTED)
+  target_link_libraries(zstd::preferred INTERFACE PkgConfig::ZSTD)
+
+  set(LIBDWARFS_WITH_LIBLZ4 @LIBLZ4_FOUND@)
+  set(LIBDWARFS_WITH_LIBLZMA @LIBLZMA_FOUND@)
+  set(LIBDWARFS_WITH_LIBBROTLI (@LIBBROTLIDEC_FOUND@ AND @LIBBROTLIENC_FOUND@))
+  set(LIBDWARFS_WITH_FLAC @FLAC_FOUND@)
+  set(LIBDWARFS_WITH_JEMALLOC @JEMALLOC_FOUND@)
+
+  if(LIBDWARFS_WITH_LIBLZ4)
+    pkg_check_modules(LIBLZ4 REQUIRED IMPORTED_TARGET liblz4>=@LIBLZ4_REQUIRED_VERSION@)
+  endif()
+
+  if(LIBDWARFS_WITH_LIBLZMA)
+    pkg_check_modules(LIBLZMA REQUIRED IMPORTED_TARGET liblzma>=@LIBLZMA_REQUIRED_VERSION@)
+  endif()
+
+  if(LIBDWARFS_WITH_LIBBROTLI)
+    pkg_check_modules(LIBBROTLIDEC REQUIRED IMPORTED_TARGET libbrotlidec>=@LIBBROTLI_REQUIRED_VERSION@)
+    pkg_check_modules(LIBBROTLIENC REQUIRED IMPORTED_TARGET libbrotlienc>=@LIBBROTLI_REQUIRED_VERSION@)
+  endif()
+
+  if(LIBDWARFS_WITH_FLAC)
+    pkg_check_modules(FLAC REQUIRED IMPORTED_TARGET flac++>=@FLAC_REQUIRED_VERSION@)
+  endif()
+
+  if(LIBDWARFS_WITH_JEMALLOC)
+    pkg_check_modules(JEMALLOC REQUIRED IMPORTED_TARGET jemalloc>=@JEMALLOC_REQUIRED_VERSION@)
+  endif()
+endif()
+
+if (NOT TARGET dwarfs::dwarfs_common)
+  include("${DWARFS_CMAKE_DIR}/dwarfs-targets.cmake")
+endif()
+
+check_required_components(dwarfs)

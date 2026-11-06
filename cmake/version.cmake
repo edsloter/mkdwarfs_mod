@@ -1,0 +1,220 @@
+#
+# Copyright (c) Marcus Holland-Moritz
+#
+# This file is part of dwarfs.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# SPDX-License-Identifier: MIT
+#
+
+set(VERSION_SRC_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/version.cpp)
+set(VERSION_HDR_FILE ${CMAKE_CURRENT_SOURCE_DIR}/include/dwarfs/version.h)
+set(PKG_VERSION_FILE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_version.cmake)
+
+if("${NIXPKGS_DWARFS_VERSION_OVERRIDE}" STREQUAL "")
+  execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --show-toplevel
+    OUTPUT_VARIABLE GIT_TOPLEVEL_RAW
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+
+  execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" log -1 --format=%h --abbrev=10
+    OUTPUT_VARIABLE PRJ_GIT_REV
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+
+  execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" log -1 --format=%cs
+    OUTPUT_VARIABLE PRJ_GIT_DATE
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+
+get_filename_component(GIT_TOPLEVEL "${GIT_TOPLEVEL_RAW}" REALPATH)
+get_filename_component(REAL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" REALPATH)
+
+message(STATUS "REAL_SOURCE_DIR: ${REAL_SOURCE_DIR} (${CMAKE_CURRENT_SOURCE_DIR})")
+message(STATUS "GIT_TOPLEVEL: ${GIT_TOPLEVEL} (${GIT_TOPLEVEL_RAW})")
+message(STATUS "PRJ_GIT_REV: ${PRJ_GIT_REV}")
+message(STATUS "PRJ_GIT_DATE: ${PRJ_GIT_DATE}")
+
+if(((NOT "${REAL_SOURCE_DIR}" STREQUAL "${GIT_TOPLEVEL}")
+   OR ("${PRJ_GIT_REV}" STREQUAL ""))
+   AND ("${NIXPKGS_DWARFS_VERSION_OVERRIDE}" STREQUAL ""))
+  if(NOT EXISTS ${VERSION_SRC_FILE} OR NOT EXISTS ${VERSION_HDR_FILE} OR NOT EXISTS ${PKG_VERSION_FILE})
+    message(FATAL_ERROR "missing version files")
+  endif()
+
+  include(${PKG_VERSION_FILE})
+
+  message(STATUS "PRJ_VERSION_FULL: ${PRJ_VERSION_FULL}")
+
+  set(DWARFS_GIT_BUILD 0)
+else()
+  if(EXISTS ${VERSION_SRC_FILE} OR EXISTS ${VERSION_HDR_FILE} OR EXISTS ${PKG_VERSION_FILE})
+    message(FATAL_ERROR "version files must not exist in git repository")
+  endif()
+
+  set(DWARFS_GIT_BUILD 1)
+
+  set(TMP_PKG_VERSION_FILE ${CMAKE_CURRENT_BINARY_DIR}/package_version.cmake)
+  set(TMP_VERSION_SRC_FILE ${CMAKE_CURRENT_BINARY_DIR}/src/version.cpp)
+  set(TMP_VERSION_HDR_FILE ${CMAKE_CURRENT_BINARY_DIR}/include/dwarfs/version.h)
+
+  if ("${NIXPKGS_DWARFS_VERSION_OVERRIDE}" STREQUAL "")
+    execute_process(
+      COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" describe --match "v*" --exact-match
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      OUTPUT_VARIABLE PRJ_GIT_RELEASE_TAG)
+    execute_process(
+      COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" describe --tags --match "v*" --dirty --abbrev=10
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      OUTPUT_VARIABLE PRJ_GIT_DESC)
+    execute_process(
+      COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --abbrev-ref HEAD
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      OUTPUT_VARIABLE PRJ_GIT_BRANCH)
+  else()
+    set(PRJ_GIT_REV "NIXPKGS")
+    set(PRJ_GIT_RELEASE_TAG "${NIXPKGS_DWARFS_VERSION_OVERRIDE}")
+    set(PRJ_GIT_DESC "${NIXPKGS_DWARFS_VERSION_OVERRIDE}")
+    set(PRJ_GIT_BRANCH "HEAD")
+  endif()
+
+  string(STRIP "${PRJ_GIT_REV}" PRJ_GIT_REV)
+  string(STRIP "${PRJ_GIT_DATE}" PRJ_GIT_DATE)
+  string(STRIP "${PRJ_GIT_DESC}" PRJ_GIT_DESC)
+  string(STRIP "${PRJ_GIT_BRANCH}" PRJ_GIT_BRANCH)
+  string(SUBSTRING "${PRJ_GIT_DESC}" 1 -1 PRJ_VERSION_FULL)
+
+  string(REGEX REPLACE "^v([0-9]+)\\..*" "\\1" PRJ_VERSION_MAJOR
+                       "${PRJ_GIT_DESC}")
+  string(REGEX REPLACE "^v[0-9]+\\.([0-9]+).*" "\\1" PRJ_VERSION_MINOR
+                       "${PRJ_GIT_DESC}")
+  string(REGEX REPLACE "^v[0-9]+\\.[0-9]+\\.([0-9]+).*" "\\1" PRJ_VERSION_PATCH
+                       "${PRJ_GIT_DESC}")
+
+  set(PRJ_VERSION_SHORT "${PRJ_VERSION_MAJOR}.${PRJ_VERSION_MINOR}.${PRJ_VERSION_PATCH}")
+
+  set(PRJ_GIT_ID ${PRJ_GIT_DESC})
+
+  if(NOT PRJ_GIT_RELEASE_TAG)
+    set(PRJ_GIT_ID "${PRJ_GIT_ID} on branch ${PRJ_GIT_BRANCH}")
+  endif()
+
+  if(PRJ_GIT_DATE)
+    set(PRJ_GIT_DATE_VALUE "\"${PRJ_GIT_DATE}\"")
+  else()
+    set(PRJ_GIT_DATE_VALUE "nullptr")
+  endif()
+
+  set(PKG_VERSION
+      "# autogenerated code, do not modify
+
+set(PRJ_GIT_REV \"${PRJ_GIT_REV}\")
+set(PRJ_GIT_DATE \"${PRJ_GIT_DATE}\")
+set(PRJ_GIT_DESC \"${PRJ_GIT_DESC}\")
+set(PRJ_GIT_BRANCH \"${PRJ_GIT_BRANCH}\")
+set(PRJ_GIT_ID \"${PRJ_GIT_ID}\")
+set(PRJ_GIT_RELEASE_TAG \"${PRJ_GIT_RELEASE_TAG}\")
+set(PRJ_VERSION_FULL \"${PRJ_VERSION_FULL}\")
+set(PRJ_VERSION_SHORT \"${PRJ_VERSION_SHORT}\")
+set(PRJ_VERSION_MAJOR \"${PRJ_VERSION_MAJOR}\")
+set(PRJ_VERSION_MINOR \"${PRJ_VERSION_MINOR}\")
+set(PRJ_VERSION_PATCH \"${PRJ_VERSION_PATCH}\")
+")
+
+  set(VERSION_SRC
+      "// autogenerated code, do not modify
+
+#include \"dwarfs/version.h\"
+
+namespace dwarfs {
+
+int get_dwarfs_library_version()
+{
+  return DWARFS_VERSION;
+}
+
+char const* const DWARFS_GIT_REV = \"${PRJ_GIT_REV}\";
+char const* const DWARFS_GIT_DATE = ${PRJ_GIT_DATE_VALUE};
+char const* const DWARFS_GIT_DESC = \"${PRJ_GIT_DESC}\";
+char const* const DWARFS_GIT_BRANCH = \"${PRJ_GIT_BRANCH}\";
+char const* const DWARFS_GIT_ID = \"${PRJ_GIT_ID}\";
+
+} // namespace dwarfs
+")
+
+  set(VERSION_HDR
+      "// autogenerated code, do not modify
+
+#pragma once
+
+// NOLINTBEGIN(cppcoreguidelines-macro-to-enum)
+#define DWARFS_VERSION_MAJOR ${PRJ_VERSION_MAJOR}
+#define DWARFS_VERSION_MINOR ${PRJ_VERSION_MINOR}
+#define DWARFS_VERSION_PATCH ${PRJ_VERSION_PATCH}
+#define DWARFS_VERSION (DWARFS_VERSION_MAJOR * 10000 + DWARFS_VERSION_MINOR * 100 + DWARFS_VERSION_PATCH)
+// NOLINTEND(cppcoreguidelines-macro-to-enum)
+
+namespace dwarfs {
+
+int get_dwarfs_library_version();
+
+extern char const* const DWARFS_GIT_REV;
+extern char const* const DWARFS_GIT_DATE;
+extern char const* const DWARFS_GIT_DESC;
+extern char const* const DWARFS_GIT_BRANCH;
+extern char const* const DWARFS_GIT_ID;
+
+} // namespace dwarfs
+")
+
+  if(EXISTS ${TMP_PKG_VERSION_FILE})
+    file(READ ${TMP_PKG_VERSION_FILE} PKG_VERSION_OLD)
+  else()
+    set(PKG_VERSION_OLD "")
+  endif()
+
+  if(EXISTS ${TMP_VERSION_SRC_FILE})
+    file(READ ${TMP_VERSION_SRC_FILE} VERSION_SRC_OLD)
+  else()
+    set(VERSION_SRC_OLD "")
+  endif()
+
+  if(EXISTS ${TMP_VERSION_HDR_FILE})
+    file(READ ${TMP_VERSION_HDR_FILE} VERSION_HDR_OLD)
+  else()
+    set(VERSION_HDR_OLD "")
+  endif()
+
+  if(NOT "${PKG_VERSION}" STREQUAL "${PKG_VERSION_OLD}")
+    file(WRITE ${TMP_PKG_VERSION_FILE} "${PKG_VERSION}")
+  endif()
+
+  if(NOT "${VERSION_SRC}" STREQUAL "${VERSION_SRC_OLD}")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src")
+    file(WRITE ${TMP_VERSION_SRC_FILE} "${VERSION_SRC}")
+  endif()
+
+  if(NOT "${VERSION_HDR}" STREQUAL "${VERSION_HDR_OLD}")
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/dwarfs")
+    file(WRITE ${TMP_VERSION_HDR_FILE} "${VERSION_HDR}")
+  endif()
+endif()

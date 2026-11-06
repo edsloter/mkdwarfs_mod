@@ -1,0 +1,20 @@
+.DS_Store
+/@*
+/*.*fs
+/tmp/
+/build*/
+/man/*.1
+/man/*.1.html
+*.log
+/.gdb_history
+/.benchmark/data/
+/.benchmark/*.db
+
+*.token
+*~
+.*.swp
+
+# VS build environment
+.vs/
+out/
+CMakeSettings.json

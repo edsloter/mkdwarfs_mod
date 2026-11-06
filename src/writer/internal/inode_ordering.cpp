@@ -1,0 +1,278 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * dwarfs is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * dwarfs is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with dwarfs.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <algorithm>
+
+#include <dwarfs/logger.h>
+#include <dwarfs/writer/inode_options.h>
+
+#include <dwarfs/internal/worker_group.h>
+#include <dwarfs/writer/internal/inode_element_view.h>
+#include <dwarfs/writer/internal/inode_ordering.h>
+#include <dwarfs/writer/internal/promise_receiver.h>
+#include <dwarfs/writer/internal/similarity_ordering.h>
+
+namespace dwarfs::writer::internal {
+
+using namespace dwarfs::internal;
+namespace fs = std::filesystem;
+
+namespace {
+
+bool inode_less_by_size(const_inode_handle const& a,
+                        const_inode_handle const& b) {
+  auto sa = a.size();
+  auto sb = b.size();
+  return sa > sb || (sa == sb && a.first_file().less_revpath(b.first_file()));
+}
+
+} // namespace
+
+template <typename LoggerPolicy>
+class inode_ordering_ final : public inode_ordering::impl {
+ public:
+  inode_ordering_(logger& lgr, progress& prog, inode_options const& opts)
+      : LOG_PROXY_INIT(lgr)
+      , prog_{prog}
+      , opts_{opts} {}
+
+  void by_inode_number(sortable_inode_span& sp) const override;
+  void by_input_order(sortable_inode_span& sp) const override;
+  void by_path(sortable_inode_span& sp) const override;
+  void by_reverse_path(sortable_inode_span& sp) const override;
+  void
+  by_similarity(sortable_inode_span& sp, fragment_category cat) const override;
+  void
+  by_nilsimsa(worker_group& wg, similarity_ordering_options const& opts,
+              sortable_inode_span& sp, fragment_category cat) const override;
+  void by_explicit_order(sortable_inode_span& sp, fs::path const& root_path,
+                         fragment_order_options const& opts) const override;
+
+ private:
+  using index_type = typename sortable_inode_span::index_type;
+
+  void
+  by_nilsimsa_impl(worker_group& wg, similarity_ordering_options const& opts,
+                   sortable_inode_span& sp, index_type& index,
+                   fragment_category cat) const;
+
+  LOG_PROXY_DECL(LoggerPolicy);
+  progress& prog_;
+  inode_options const& opts_;
+};
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_inode_number(
+    sortable_inode_span& sp) const {
+  std::ranges::sort(sp.index(), [&sp](auto const a, auto const b) {
+    auto const& ha = sp.raw_handle(a);
+    auto const& hb = sp.raw_handle(b);
+    return ha.num() < hb.num();
+  });
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_input_order(
+    sortable_inode_span& sp) const {
+  std::ranges::sort(sp.index(), [&sp](auto const a, auto const b) {
+    auto const& ha = sp.raw_handle(a);
+    auto const& hb = sp.raw_handle(b);
+    return ha.first_file().order_index() < hb.first_file().order_index();
+  });
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_path(sortable_inode_span& sp) const {
+  std::vector<std::string> paths;
+
+  auto& index = sp.index();
+
+  // TODO: this will potentially allocate space for *significantly* more
+  //       objects that are actually referenced by the index
+  paths.resize(sp.raw_size());
+
+  for (auto i : index) {
+    assert(i < paths.size());
+    paths[i] = sp.raw_handle(i).first_file().unix_dpath();
+  }
+
+  std::ranges::sort(index, [&paths](auto const a, auto const b) {
+    return paths[a] < paths[b];
+  });
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_reverse_path(
+    sortable_inode_span& sp) const {
+  auto& index = sp.index();
+
+  std::ranges::sort(index, [&sp](auto const a, auto const b) {
+    auto const& ha = sp.raw_handle(a);
+    auto const& hb = sp.raw_handle(b);
+    return ha.first_file().less_revpath(hb.first_file());
+  });
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_similarity(sortable_inode_span& sp,
+                                                  fragment_category cat) const {
+  std::vector<std::optional<uint32_t>> hash_cache;
+
+  auto& index = sp.index();
+  bool any_missing = false;
+
+  hash_cache.resize(sp.raw_size());
+
+  for (auto i : index) {
+    auto& cache = hash_cache[i];
+    cache = sp.raw_handle(i).similarity_hash(cat);
+    if (!cache.has_value()) {
+      any_missing = true;
+    }
+  }
+
+  auto size_pred = [&sp](auto const a, auto const b) {
+    auto const& ha = sp.raw_handle(a);
+    auto const& hb = sp.raw_handle(b);
+    return inode_less_by_size(ha, hb);
+  };
+
+  auto start = index.begin();
+
+  if (any_missing) {
+    start =
+        std::stable_partition(index.begin(), index.end(), [&](auto const i) {
+          return !hash_cache[i].has_value();
+        });
+
+    std::sort(index.begin(), start, size_pred);
+  }
+
+  std::sort(start, index.end(), [&](auto const a, auto const b) {
+    assert(hash_cache[a].has_value());
+    assert(hash_cache[b].has_value());
+
+    auto const ca = *hash_cache[a];
+    auto const cb = *hash_cache[b];
+
+    if (ca < cb) {
+      return true;
+    }
+
+    if (ca > cb) {
+      return false;
+    }
+
+    return size_pred(a, b);
+  });
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_nilsimsa(
+    worker_group& wg, similarity_ordering_options const& opts,
+    sortable_inode_span& sp, fragment_category cat) const {
+  auto& index = sp.index();
+
+  if (opts_.max_similarity_scan_size) {
+    auto mid = std::stable_partition(index.begin(), index.end(), [&](auto i) {
+      return !sp.raw_handle(i).nilsimsa_similarity_hash(cat);
+    });
+
+    if (mid != index.begin()) {
+      std::sort(index.begin(), mid, [&](auto a, auto b) {
+        return inode_less_by_size(sp.raw_handle(a), sp.raw_handle(b));
+      });
+
+      if (mid != index.end()) {
+        index_type small_index(mid, index.end());
+        by_nilsimsa_impl(wg, opts, sp, small_index, cat);
+        std::ranges::copy(small_index, mid);
+      }
+
+      return;
+    }
+  }
+
+  by_nilsimsa_impl(wg, opts, sp, index, cat);
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_nilsimsa_impl(
+    worker_group& wg, similarity_ordering_options const& opts,
+    sortable_inode_span& sp, index_type& index, fragment_category cat) const {
+  auto ev = inode_element_view(sp, index, cat);
+  std::promise<index_type> promise;
+  auto future = promise.get_future();
+  auto sim_order = similarity_ordering(LOG_GET_LOGGER, prog_, wg, opts);
+  sim_order.order_nilsimsa(ev, make_receiver(std::move(promise)),
+                           std::move(index));
+  future.get().swap(index);
+}
+
+template <typename LoggerPolicy>
+void inode_ordering_<LoggerPolicy>::by_explicit_order(
+    sortable_inode_span& sp, fs::path const& root_path,
+    fragment_order_options const& opts) const {
+  auto& index = sp.index();
+  auto const& order = opts.explicit_order;
+
+  if (order.empty()) {
+    LOG_WARN << "empty explicit order file set";
+  }
+
+  std::vector<std::filesystem::path> paths;
+  std::vector<std::optional<size_t>> path_order;
+  paths.resize(sp.raw_size());
+  path_order.resize(sp.raw_size());
+
+  for (auto i : index) {
+    paths[i] =
+        sp.raw_handle(i).first_file().fs_path().lexically_relative(root_path);
+
+    if (auto it = order.find(paths[i]); it != order.end()) {
+      path_order[i] = it->second;
+    } else {
+      LOG_DEBUG << "explicit order: " << paths[i]
+                << " not found in explicit order file";
+    }
+  }
+
+  std::ranges::sort(index, [&](auto const a, auto const b) {
+    auto const& ai = path_order[a];
+    auto const& bi = path_order[b];
+    return ai.has_value() && bi.has_value()
+               ? *ai < *bi
+               : sp.raw_handle(a).num() < sp.raw_handle(b).num();
+  });
+
+  for (auto i : index) {
+    LOG_DEBUG << "explicit order: " << paths[i];
+  }
+}
+
+inode_ordering::inode_ordering(logger& lgr, progress& prog,
+                               inode_options const& opts)
+    : impl_(make_unique_logging_object<impl, internal::inode_ordering_,
+                                       logger_policies>(lgr, prog, opts)) {}
+
+} // namespace dwarfs::writer::internal

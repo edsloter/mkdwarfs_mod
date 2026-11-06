@@ -1,0 +1,79 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * dwarfs is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * dwarfs is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with dwarfs.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include <dwarfs/file_stat.h>
+#include <dwarfs/history_config.h>
+#include <dwarfs/writer/entry_interface.h>
+#include <dwarfs/writer/inode_options.h>
+#include <dwarfs/writer/metadata_options.h>
+
+namespace dwarfs::writer {
+
+// Checkpoint/resume configuration. When `dir` is set, Phase 1 scan results
+// are journaled there so an interrupted build can resume without re-reading
+// file data. Additionally, for global de-duplication, Phase 2 periodically
+// records a durable checkpoint (block map, writer state, dedup index offset)
+// so an interrupted build can resume without recompressing already-written
+// blocks. `inputs_hash`/`config_hash` identify the job; state is only reused
+// when both match.
+struct checkpoint_options {
+  std::filesystem::path dir;
+  bool resume{false};
+  bool keep{false};
+  uint64_t inputs_hash{0};
+  uint64_t config_hash{0};
+  // Enable periodic Phase 2 (block building) checkpoints. Requires global
+  // de-duplication so that category streams are processed sequentially.
+  bool phase2{false};
+  // Number of input bytes between Phase 2 checkpoints.
+  uint64_t phase2_interval_bytes{2ULL << 30};
+};
+
+struct scanner_options {
+  std::optional<std::string> file_hash_algorithm{"xxh3-128"};
+  bool remove_empty_dirs{false};
+  bool with_devices{false};
+  bool with_specials{false};
+  inode_options inode;
+  std::optional<std::function<void(bool, entry_interface const&)>>
+      debug_filter_function;
+  size_t num_segmenter_workers{1};
+  bool enable_history{true};
+  std::optional<std::vector<std::string>> command_line_arguments;
+  history_config history;
+  metadata_options metadata;
+  bool hollow_filesystem{false};
+  checkpoint_options checkpoint;
+};
+
+} // namespace dwarfs::writer

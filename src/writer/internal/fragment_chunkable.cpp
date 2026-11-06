@@ -1,0 +1,65 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * dwarfs is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * dwarfs is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with dwarfs.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <fmt/format.h>
+
+#include <dwarfs/writer/categorizer.h>
+#include <dwarfs/writer/inode_fragments.h>
+
+#include <dwarfs/writer/internal/fragment_chunkable.h>
+
+namespace dwarfs::writer::internal {
+
+fragment_chunkable::fragment_chunkable(const_inode_handle ino,
+                                       single_inode_fragment_view frag,
+                                       file_off_t offset, file_view const& mm,
+                                       categorizer_manager const* catmgr)
+    : ino_{ino}
+    , frag_{frag}
+    , offset_{offset}
+    , mm_{mm}
+    , catmgr_{catmgr} {}
+
+fragment_chunkable::~fragment_chunkable() = default;
+
+const_file_handle fragment_chunkable::get_file() const { return ino_.any(); }
+
+file_size_t fragment_chunkable::size() const { return frag_.size(); }
+
+std::string fragment_chunkable::description() const {
+  return fmt::format("{}fragment at offset {} of inode {} [{}] - size: {}",
+                     category_prefix(catmgr_, frag_.category()), offset_,
+                     ino_.num(), ino_.first_file().unix_dpath(), size());
+}
+
+file_extents_iterable fragment_chunkable::extents() const {
+  return mm_.extents({offset_, frag_.size()});
+}
+
+void fragment_chunkable::add_chunk(size_t block, size_t offset, size_t size) {
+  frag_.add_chunk(block, offset, size);
+}
+
+void fragment_chunkable::add_hole(file_size_t size) { frag_.add_hole(size); }
+
+} // namespace dwarfs::writer::internal

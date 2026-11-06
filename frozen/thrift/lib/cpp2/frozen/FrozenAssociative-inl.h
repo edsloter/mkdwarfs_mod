@@ -1,0 +1,184 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) Marcus Holland-Moritz
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * This file is derived from fbthrift and has been modified by
+ * Marcus Holland-Moritz for use in dwarfs.
+ */
+
+#include <type_traits>
+
+namespace apache::thrift::frozen {
+
+namespace detail {
+
+template <class Table, class K, class V>
+struct KeyExtractor {
+  using KeyType = K;
+  using rvalue_reference = std::add_rvalue_reference_t<
+      std::remove_reference_t<typename Table::const_reference>>;
+  using const_reference = Table::const_reference;
+
+  // deleted functions used to avoid returning references to temporary values
+  static const K& getKey(const std::pair<const K, V>&& pair) = delete;
+  static const K& getKey(const std::pair<const K, V>& pair) {
+    return pair.first;
+  }
+
+  // To support VectorAsHashMap
+  static const K& getKey(const std::pair<K, V>&& pair) = delete;
+  static const K& getKey(const std::pair<K, V>& pair) { return pair.first; }
+
+  // Some maps don't contain pairs; listen to whatever they say about their
+  // const_reference type. template shenanigans used to avoid duplicating the
+  // previous two overloads in the cases where they're redundant.
+  template <typename K2 = K, typename V2 = V>
+  static const K& getKey(rvalue_reference)
+    requires(!std::is_same_v<rvalue_reference, const std::pair<K2, V2> &&> &&
+             !std::
+                 is_same_v<rvalue_reference, const std::pair<const K2, V2> &&>)
+  = delete;
+  template <typename K2 = K, typename V2 = V>
+  static const K& getKey(const_reference pair)
+    requires(
+        !std::is_same_v<const_reference, const std::pair<K2, V2>&> &&
+        !std::is_same_v<const_reference, const std::pair<const K2, V2>&>)
+  {
+    return pair.first;
+  }
+
+  static const std::pair<const K, V>* getPointer(rvalue_reference) = delete;
+  static const std::pair<const K, V>* getPointer(const_reference pair) {
+    // Cast to support VectorAsHashMap.
+    return reinterpret_cast<const std::pair<const K, V>*>(&pair);
+  }
+
+  static Layout<K>::View getViewKey(
+      const Layout<std::pair<const K, V>>::View& pair) {
+    return pair.first();
+  }
+};
+
+template <class K>
+struct SelfKey {
+  using KeyType = K;
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
+  static const K& getKey(const K& item) { return item; }
+
+  static const K* getPointer(const K& item) { return &item; }
+
+  static Layout<K>::View getViewKey(Layout<K>::View itemView) {
+    return itemView;
+  }
+};
+
+template <
+    class T,
+    class K,
+    class V,
+    template <class, class, class, class> class Table>
+struct MapTableLayout
+    : public Table<T, std::pair<const K, V>, KeyExtractor<T, K, V>, K> {
+  using Base = Table<T, std::pair<const K, V>, KeyExtractor<T, K, V>, K>;
+  using LayoutSelf = MapTableLayout;
+
+  class View : public Base::View {
+   public:
+    using key_type = Layout<K>::View;
+    using mapped_type = Layout<V>::View;
+
+    View() = default;
+    View(const LayoutSelf* layout, ViewPosition position)
+        : Base::View(layout, position) {}
+
+    mapped_type getDefault(
+        const key_type& key, mapped_type def = mapped_type()) const {
+      auto found = this->find(key);
+      if (found == this->end()) {
+        return std::move(def);
+      }
+      return found->second();
+    }
+
+    std::optional<mapped_type> getOptional(const key_type& key) const {
+      std::optional<mapped_type> rv;
+      auto found = this->find(key);
+      if (found != this->end()) {
+        rv.emplace(found->second());
+      }
+      return rv;
+    }
+
+    mapped_type at(const key_type& key) const {
+      auto found = this->find(key);
+      if (found == this->end()) {
+        throw std::out_of_range("Key not found");
+      }
+      return found->second();
+    }
+  };
+
+  View view(ViewPosition self) const { return View(this, self); }
+
+  void print(std::ostream& os, int level) const override {
+    Base::print(os, level);
+    os << DebugLine(level) << "...viewed as a map";
+  }
+};
+
+template <class T, class V, template <class, class, class, class> class Table>
+struct SetTableLayout : public Table<T, V, SelfKey<V>, V> {
+  using Base = Table<T, V, SelfKey<V>, V>;
+
+  void print(std::ostream& os, int level) const override {
+    Base::print(os, level);
+    os << DebugLine(level) << "...viewed as a set";
+  }
+};
+} // namespace detail
+
+template <class T>
+struct Layout<T, std::enable_if_t<IsOrderedMap<T>::value>>
+    : public apache::thrift::frozen::detail::MapTableLayout<
+          T,
+          typename T::key_type,
+          typename T::mapped_type,
+          apache::thrift::frozen::detail::SortedTableLayout> {};
+
+template <class T>
+struct Layout<T, std::enable_if_t<IsOrderedSet<T>::value>>
+    : public apache::thrift::frozen::detail::SetTableLayout<
+          T,
+          typename T::value_type,
+          apache::thrift::frozen::detail::SortedTableLayout> {};
+template <class T>
+struct Layout<T, std::enable_if_t<IsHashMap<T>::value>>
+    : public apache::thrift::frozen::detail::MapTableLayout<
+          T,
+          typename T::key_type,
+          typename T::mapped_type,
+          apache::thrift::frozen::detail::HashTableLayout> {};
+
+template <class T>
+struct Layout<T, std::enable_if_t<IsHashSet<T>::value>>
+    : public apache::thrift::frozen::detail::SetTableLayout<
+          T,
+          typename T::value_type,
+          apache::thrift::frozen::detail::HashTableLayout> {};
+} // namespace apache::thrift::frozen
+
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsHashMap, std::unordered_map)
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsHashMap, phmap::flat_hash_map)
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsHashMap, phmap::node_hash_map)
+
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsHashSet, std::unordered_set)
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsHashSet, phmap::flat_hash_set)
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsHashSet, phmap::node_hash_set)
+
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsOrderedMap, std::map)
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsOrderedMap, phmap::btree_map)
+
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsOrderedSet, std::set)
+THRIFT_DECLARE_TRAIT_TEMPLATE(IsOrderedSet, phmap::btree_set)

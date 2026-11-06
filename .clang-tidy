@@ -1,0 +1,74 @@
+Checks:
+  - bugprone-*
+  - -bugprone-easily-swappable-parameters
+  - -bugprone-narrowing-conversions
+  - -bugprone-implicit-widening-of-multiplication-result
+  - -bugprone-unchecked-optional-access
+  # TODO: definitely revisit this one
+  - -bugprone-exception-escape
+  # TODO: good idea, but needed for things like std::hash
+  - -bugprone-std-namespace-modification
+  - cert-*
+  - clang-diagnostic-*
+  - clang-analyzer-*
+  - clang-analyzer-core.*
+  - clang-analyzer-cplusplus.*
+  - clang-analyzer-nullability.*
+  - clang-analyzer-unix.*
+  - cppcoreguidelines-*
+  - -cppcoreguidelines-avoid-const-or-ref-data-members
+  - -cppcoreguidelines-avoid-do-while
+  - -cppcoreguidelines-avoid-magic-numbers
+  - -cppcoreguidelines-macro-usage
+  - -cppcoreguidelines-narrowing-conversions
+  - -cppcoreguidelines-pro-bounds-constant-array-index
+  - -cppcoreguidelines-special-member-functions
+  # fully agree, but there are some cases where it's currently not
+  # done on purpose; TODO: revisit
+  - -cppcoreguidelines-use-enum-class
+  # TODO: good idea, but too many places that would need touching
+  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+  - modernize-*
+  # a good idea, but only for more than one mutex
+  - -modernize-use-scoped-lock
+  - -modernize-use-trailing-return-type
+  - -modernize-macro-to-enum
+  # already covered by cppcoreguidelines-avoid-c-arrays
+  - -modernize-avoid-c-arrays
+  - performance-*
+  - -performance-enum-size
+  - portability-*
+  - -portability-avoid-pragma-once
+  - -portability-template-virtual-member-function
+  - readability-*
+  - -readability-magic-numbers
+  - -readability-identifier-length
+  - -readability-implicit-bool-conversion
+  - -readability-named-parameter
+  - -readability-redundant-member-init
+  - -readability-math-missing-parentheses
+  - -readability-isolate-declaration
+  - -readability-qualified-auto
+  - -readability-use-concise-preprocessor-directives
+  # TODO: revisit once we drop support for gcc-12, which still chokes on some cases of this
+  - -readability-redundant-typename
+# TODO
+  - -cppcoreguidelines-init-variables
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic
+  - -cppcoreguidelines-pro-type-member-init
+  - -cppcoreguidelines-pro-type-reinterpret-cast
+  - -modernize-pass-by-value
+  - -modernize-use-nodiscard
+  - -modernize-use-designated-initializers
+  - -readability-avoid-nested-conditional-operator
+  - -readability-convert-member-functions-to-static
+  - -readability-function-cognitive-complexity
+  - -readability-function-size
+WarningsAsErrors: 'bugprone-use-after-move'
+UseColor: true
+ExtraArgsBefore: ['-Wno-unknown-warning-option']
+CheckOptions:
+  - key: cppcoreguidelines-avoid-do-while.IgnoreMacros
+    value: true
+HeaderFilterRegex: '.*/(include/dwarfs/.*|ricepp/[^/]*\.h|ricepp/include/ricepp/.*|frozen/thrift/lib/cpp/.*|frozen/thrift/lib/cpp2/frozen/[^/]*\.h|frozen/thrift/lib/cpp2/frozen/schema/[^/]*\.h)'
+SystemHeaders: false

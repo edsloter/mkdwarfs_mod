@@ -1,0 +1,47 @@
+#
+# Copyright (c) Marcus Holland-Moritz
+#
+# This file is part of dwarfs.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# SPDX-License-Identifier: MIT
+#
+
+if(CPACK_SOURCE_INSTALLED_DIRECTORIES)
+  message(STATUS "Adding versioning files from @PROJECT_BINARY_DIR@ to ${CMAKE_CURRENT_BINARY_DIR}...")
+  file(INSTALL "@PROJECT_BINARY_DIR@/include/dwarfs/version.h" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/dwarfs")
+  file(INSTALL "@PROJECT_BINARY_DIR@/src/version.cpp" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/src")
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc/man1")
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc/man5")
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc/man7")
+  file(INSTALL "@PROJECT_BINARY_DIR@/man5/dwarfs-format.5" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/doc/man5")
+  file(INSTALL "@PROJECT_BINARY_DIR@/man7/dwarfs-env.7" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/doc/man7")
+  foreach(prog dwarfs dwarfsck dwarfsextract mkdwarfs)
+    file(INSTALL "@PROJECT_BINARY_DIR@/tools/src/${prog}_manpage.cpp" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/tools/src")
+    file(INSTALL "@PROJECT_BINARY_DIR@/man1/${prog}.1" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/doc/man1")
+  endforeach()
+  file(INSTALL "@PROJECT_BINARY_DIR@/package_version.cmake" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/cmake")
+  message(STATUS "Adding generated thrift files from @PROJECT_BINARY_DIR@ to ${CMAKE_CURRENT_BINARY_DIR}...")
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/thrift/dwarfs")
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/thrift/lib/thrift")
+  file(INSTALL "@PROJECT_BINARY_DIR@/thrift/dwarfs/gen-cpp-lite" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/thrift/dwarfs")
+  file(INSTALL "@PROJECT_BINARY_DIR@/thrift/lib/thrift/gen-cpp-lite" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/thrift/lib/thrift")
+  file(INSTALL "@PROJECT_BINARY_DIR@/thrift/lib/cpp2/frozen/test/gen-cpp-lite" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/thrift/lib/cpp2/frozen/test")
+endif()

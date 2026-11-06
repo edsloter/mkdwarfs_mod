@@ -1,0 +1,120 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the “Software”), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
+
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <dwarfs/thrift_lite/concepts.h>
+#include <dwarfs/thrift_lite/types.h>
+
+namespace dwarfs::thrift_lite {
+
+struct decode_options {
+  std::uint32_t max_struct_depth{std::numeric_limits<std::uint32_t>::max()};
+  std::uint32_t max_container_elems{std::numeric_limits<std::uint32_t>::max()};
+  std::uint32_t max_string_bytes{std::numeric_limits<std::uint32_t>::max()};
+};
+
+class compact_reader final {
+ public:
+  explicit compact_reader(std::span<std::byte const> in,
+                          decode_options const& options = {});
+
+  auto consumed_bytes() const noexcept -> std::size_t;
+  auto remaining_bytes() const noexcept -> std::size_t;
+
+  void read_struct_begin();
+  void read_struct_end();
+
+  void read_field_begin(ttype& type, std::int16_t& field_id);
+  void read_field_end();
+
+  auto read_bool() -> bool;
+  auto read_byte() -> std::int8_t;
+  auto read_i16() -> std::int16_t;
+  auto read_i32() -> std::int32_t;
+  auto read_i64() -> std::int64_t;
+
+  auto read_double() -> double;
+
+  void read_binary(std::vector<std::byte>& out);
+  void read_string(std::string& out);
+
+  void read_list_begin(ttype& elem_type, std::int32_t& size);
+  void read_list_end();
+
+  void read_set_begin(ttype& elem_type, std::int32_t& size);
+  void read_set_end();
+
+  void read_map_begin(ttype& key_type, ttype& val_type, std::int32_t& size);
+  void read_map_end();
+
+  void skip(ttype type);
+
+ private:
+  auto take_u8() -> std::uint8_t;
+  void skip_bytes(std::size_t n);
+  void ensure_available(std::size_t n) const;
+
+  void ensure_no_pending_bool() const;
+
+  template <std::integral T>
+  auto read_varint() -> T;
+
+  auto read_i16_unchecked() -> std::int16_t;
+  auto read_size(std::string_view what) -> std::int32_t;
+  auto read_data(std::string_view what) -> std::span<std::byte const>;
+
+  auto to_ttype(std::uint8_t compact_type) -> ttype;
+
+  auto read_size_i32(char const* what) -> std::int32_t;
+
+  void skip_impl(ttype type, std::uint32_t depth);
+
+  std::span<std::byte const> in_{};
+  std::size_t pos_{0};
+  decode_options options_{};
+
+  std::vector<std::int16_t> last_field_stack_{};
+  std::int16_t last_field_id_{0};
+  std::uint32_t struct_depth_{0};
+  std::optional<bool> pending_bool_value_{};
+};
+
+static_assert(protocol_reader_type<compact_reader>);
+
+} // namespace dwarfs::thrift_lite

@@ -1,0 +1,169 @@
+# SPDX-FileCopyrightText: Copyright (c) Marcus Holland-Moritz
+# SPDX-License-Identifier: MIT
+
+---
+name: Run Docker Build
+
+on:
+  workflow_call:
+    inputs:
+      build_type:
+        required: true
+        type: string
+      build_arch:
+        required: true
+        type: string
+      cross_arch:
+        required: false
+        type: string
+        default: ''
+      build_dist:
+        required: true
+        type: string
+      build_from_tarball:
+        required: false
+        type: boolean
+        default: false
+      upload_artifacts:
+        required: false
+        type: boolean
+        default: false
+      upload_coverage:
+        required: false
+        type: boolean
+        default: false
+      skip_slow_tests:
+        required: false
+        type: boolean
+        default: false
+      skip_fuse_tests:
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build:
+    runs-on:
+      - self-hosted
+      - Linux
+      - ${{ inputs.build_arch }}
+
+    # Building a docker container on RISC-V can take an awful long time
+    timeout-minutes: 2880
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: 'true'
+          fetch-depth: '0'
+          ref: ${{ github.ref }}
+
+      - name: Build Docker Image
+        shell: bash
+        run: |
+          dockerfile=".docker/Dockerfile.${{ inputs.build_dist }}"
+          if [[ "${{ inputs.build_dist }}" == "alpine" ]]; then
+            dockerfile=".docker/Dockerfile.alpine_$(uname -m)"
+          fi
+          docker buildx build --progress=plain -f "$dockerfile" \
+            -t dwarfs-linux-build-${{ inputs.build_dist }} \
+            .docker
+
+      - name: Run Build
+        run: |
+          docker run --rm --init \
+            --cap-add SYS_ADMIN --device /dev/fuse \
+            --security-opt seccomp:unconfined --security-opt apparmor:unconfined \
+            --mount type=bind,source=${GITHUB_WORKSPACE},target=/workspace,readonly \
+            --mount type=bind,source=${{ runner.temp }},target=/tmp-runner \
+            --mount type=bind,source=${HOME}/github-ccache,target=/ccache \
+            --mount type=bind,source=${HOME}/shared-ccache,target=/shared-ccache \
+            --mount type=bind,source=${HOME}/github-local,target=/local \
+            --mount type=bind,source=/mnt/opensource/artifacts/dwarfs,target=/artifacts \
+            ${{ inputs.build_from_tarball && '--env BUILD_FROM_TARBALL=1' || '' }} \
+            ${{ inputs.skip_slow_tests && '--env DWARFS_SKIP_SLOW_TESTS=1' || '' }} \
+            ${{ inputs.skip_fuse_tests && '--env DWARFS_SKIP_FUSE_TESTS=1' || '' }} \
+            --env BUILD_TYPE=${{ inputs.build_type }} \
+            --env BUILD_ARCH=${{ inputs.build_arch }} \
+            --env CROSS_ARCH=${{ inputs.cross_arch }} \
+            --env BUILD_DIST=${{ inputs.build_dist }} \
+            --env GITHUB_WORKSPACE \
+            --env GITHUB_REF_NAME \
+            --env GITHUB_REF_TYPE \
+            --env GITHUB_RUN_ID \
+            --env GITHUB_RUN_NUMBER \
+            --env GITHUB_RUN_ATTEMPT \
+            --env RUNNER_NAME=${{ runner.name }} \
+            dwarfs-linux-build-${{ inputs.build_dist }}
+
+      - name: Upload Coverage Data (Codecov)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ runner.temp }}/dwarfs-coverage.lcov
+          fail_ci_if_error: false
+        if: inputs.upload_coverage
+
+      - name: Upload Coverage Data (Coveralls)
+        uses: coverallsapp/github-action@v2
+        with:
+          file: ${{ runner.temp }}/dwarfs-coverage.lcov
+          format: 'lcov'
+          fail-on-error: false
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+        if: inputs.upload_coverage
+
+      - name: Prepare Artifact Upload
+        run: cat ${{ runner.temp }}/artifacts.env >> $GITHUB_ENV
+        if: inputs.upload_artifacts
+
+      - name: Upload Binary Tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.binary_tarball }}
+          path: ${{ runner.temp }}/artifacts/${{ env.binary_tarball }}
+          if-no-files-found: error
+          compression-level: 0
+          archive: false
+        env:
+          ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: 5
+        if: inputs.upload_artifacts && env.binary_tarball
+
+      - name: Upload Universal Binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.dwarfsuniversal_binary }}
+          path: ${{ runner.temp }}/artifacts/${{ env.dwarfsuniversal_binary }}
+          if-no-files-found: error
+          compression-level: 0
+          archive: false
+        env:
+          ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: 5
+        if: inputs.upload_artifacts && env.dwarfsuniversal_binary
+
+      - name: Upload Fuse-Extract Binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.dwarfsfuseextract_binary }}
+          path: ${{ runner.temp }}/artifacts/${{ env.dwarfsfuseextract_binary }}
+          if-no-files-found: error
+          compression-level: 0
+          archive: false
+        env:
+          ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: 5
+        if: inputs.upload_artifacts && env.dwarfsfuseextract_binary
+
+      - name: Upload Coverage Data Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dwarfs-coverage
+          path: ${{ runner.temp }}/dwarfs-coverage.*
+          if-no-files-found: error
+        env:
+          ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: 5
+        if: inputs.upload_coverage

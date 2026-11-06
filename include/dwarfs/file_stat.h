@@ -1,0 +1,229 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the “Software”), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <iosfwd>
+#include <memory>
+#include <type_traits>
+
+#include <dwarfs/error.h>
+#include <dwarfs/file_type.h>
+
+namespace dwarfs {
+
+class file_stat {
+ public:
+  using valid_fields_type = uint32_t;
+  using perms_type = std::underlying_type_t<std::filesystem::perms>;
+  using mode_type = uint32_t;
+  using dev_type = uint64_t;
+  using ino_type = uint64_t;
+  using nlink_type = uint64_t;
+  using uid_type = uint32_t;
+  using gid_type = uint32_t;
+  using off_type = int64_t;
+  using blksize_type = int64_t;
+  using blkcnt_type = int64_t;
+  using time_type = int64_t;
+  struct timespec_type {
+    time_type sec{0};
+    uint32_t nsec{0};
+
+    friend constexpr bool
+    operator==(timespec_type const& a, timespec_type const& b) = default;
+    friend std::ostream& operator<<(std::ostream& os, timespec_type const& ts);
+  };
+
+  static constexpr valid_fields_type dev_valid = 1 << 0;
+  static constexpr valid_fields_type ino_valid = 1 << 1;
+  static constexpr valid_fields_type nlink_valid = 1 << 2;
+  static constexpr valid_fields_type mode_valid = 1 << 3;
+  static constexpr valid_fields_type uid_valid = 1 << 4;
+  static constexpr valid_fields_type gid_valid = 1 << 5;
+  static constexpr valid_fields_type rdev_valid = 1 << 6;
+  static constexpr valid_fields_type size_valid = 1 << 7;
+  static constexpr valid_fields_type blksize_valid = 1 << 8;
+  static constexpr valid_fields_type blocks_valid = 1 << 9;
+  static constexpr valid_fields_type atime_valid = 1 << 10;
+  static constexpr valid_fields_type mtime_valid = 1 << 11;
+  static constexpr valid_fields_type ctime_valid = 1 << 12;
+  static constexpr valid_fields_type allocated_size_valid = 1 << 13;
+  static constexpr valid_fields_type all_valid = (1 << 14) - 1;
+
+  static std::chrono::nanoseconds native_time_resolution();
+
+  file_stat();
+  explicit file_stat(std::filesystem::path const& path);
+
+  void ensure_valid(valid_fields_type fields) const;
+
+  std::filesystem::file_status status() const;
+  posix_file_type::value type() const;
+
+  perms_type permissions() const;
+  void set_permissions(perms_type perms);
+
+  dev_type dev() const;
+  dev_type dev_unchecked() const { return dev_; }
+  void set_dev(dev_type dev);
+
+  ino_type ino() const;
+  ino_type ino_unchecked() const { return ino_; }
+  void set_ino(ino_type ino);
+
+  nlink_type nlink() const;
+  nlink_type nlink_unchecked() const { return nlink_; }
+  void set_nlink(nlink_type nlink);
+
+  mode_type mode() const;
+  mode_type mode_unchecked() const { return mode_; }
+  void set_mode(mode_type mode);
+
+  uid_type uid() const;
+  uid_type uid_unchecked() const { return uid_; }
+  void set_uid(uid_type uid);
+
+  gid_type gid() const;
+  gid_type gid_unchecked() const { return gid_; }
+  void set_gid(gid_type gid);
+
+  dev_type rdev() const;
+  dev_type rdev_unchecked() const { return rdev_; }
+  void set_rdev(dev_type rdev);
+
+  off_type size() const;
+  off_type size_unchecked() const { return size_; }
+  void set_size(off_type size);
+
+  blksize_type blksize() const;
+  blksize_type blksize_unchecked() const { return blksize_; }
+  void set_blksize(blksize_type blksize);
+
+  blkcnt_type blocks() const;
+  blkcnt_type blocks_unchecked() const { return blocks_; }
+  void set_blocks(blkcnt_type blocks);
+
+  time_type atime() const;
+  time_type atime_unchecked() const { return atimespec_.sec; }
+  time_type atime_nsec_unchecked() const { return atimespec_.nsec; }
+  void set_atime(time_type atime);
+
+  time_type mtime() const;
+  time_type mtime_unchecked() const { return mtimespec_.sec; }
+  time_type mtime_nsec_unchecked() const { return mtimespec_.nsec; }
+  void set_mtime(time_type mtime);
+
+  time_type ctime() const;
+  time_type ctime_unchecked() const { return ctimespec_.sec; }
+  time_type ctime_nsec_unchecked() const { return ctimespec_.nsec; }
+  void set_ctime(time_type ctime);
+
+  timespec_type atimespec() const;
+  timespec_type atimespec_unchecked() const { return atimespec_; }
+  void set_atimespec(timespec_type atimespec);
+  void set_atimespec(time_type sec, uint32_t nsec);
+
+  timespec_type mtimespec() const;
+  timespec_type mtimespec_unchecked() const { return mtimespec_; }
+  void set_mtimespec(timespec_type mtimespec);
+  void set_mtimespec(time_type sec, uint32_t nsec);
+
+  timespec_type ctimespec() const;
+  timespec_type ctimespec_unchecked() const { return ctimespec_; }
+  void set_ctimespec(timespec_type ctimespec);
+  void set_ctimespec(time_type sec, uint32_t nsec);
+
+  off_type allocated_size() const;
+  off_type allocated_size_unchecked() const { return allocated_size_; }
+  void set_allocated_size(off_type allocated_size);
+
+  bool is_directory() const;
+  bool is_regular_file() const;
+  bool is_symlink() const;
+  bool is_device() const;
+
+  static std::string perm_string(mode_type mode);
+  static std::string mode_string(mode_type mode);
+
+  std::string perm_string() const { return perm_string(mode()); }
+  std::string mode_string() const { return mode_string(mode()); }
+
+  template <typename T>
+  void copy_to(T* out) const {
+    ensure_valid(all_valid);
+
+    out->st_dev = dev_;
+    out->st_ino = ino_;
+    out->st_nlink = nlink_;
+    out->st_mode = mode_;
+    out->st_uid = uid_;
+    out->st_gid = gid_;
+    out->st_rdev = rdev_;
+    out->st_size = size_;
+    out->st_blksize = blksize_;
+    out->st_blocks = blocks_;
+
+    auto copy_timespec = [](auto& dst, file_stat::timespec_type const& src) {
+      dst.tv_sec = src.sec;
+      dst.tv_nsec = src.nsec;
+    };
+
+#ifdef __APPLE__
+    copy_timespec(out->st_atimespec, atimespec_);
+    copy_timespec(out->st_mtimespec, mtimespec_);
+    copy_timespec(out->st_ctimespec, ctimespec_);
+#else
+    copy_timespec(out->st_atim, atimespec_);
+    copy_timespec(out->st_mtim, mtimespec_);
+    copy_timespec(out->st_ctim, ctimespec_);
+#endif
+  }
+
+ private:
+  uint32_t valid_fields_{0};
+  dev_type dev_{};
+  ino_type ino_{};
+  nlink_type nlink_{};
+  mode_type mode_{};
+  uid_type uid_{};
+  gid_type gid_{};
+  dev_type rdev_{};
+  off_type size_{};
+  blksize_type blksize_{};
+  blkcnt_type blocks_{};
+  timespec_type atimespec_{};
+  timespec_type mtimespec_{};
+  timespec_type ctimespec_{};
+  off_type allocated_size_{};
+  std::exception_ptr exception_;
+};
+
+} // namespace dwarfs

@@ -1,0 +1,52 @@
+# syntax=docker/dockerfile:1
+
+# SPDX-FileCopyrightText: Copyright (c) Marcus Holland-Moritz
+# SPDX-License-Identifier: MIT
+
+FROM fedora:rawhide@sha256:af8cdc432037f5e8e288bbc26c2b55b96000a911ec5b37959cd464d830f6cc5b
+RUN dnf update -y
+RUN dnf install -y \
+        bash-completion \
+        vim \
+        less
+RUN dnf install -y \
+        gcc \
+        g++ \
+        clang \
+        man \
+        pip \
+        git \
+        zstd \
+        ccache \
+        ninja-build \
+        cmake \
+        make \
+        bubblewrap \
+        rubygem-ronn \
+        fuse \
+        fuse3 \
+        fuse-devel \
+        fuse3-devel \
+        pkg-config \
+        binutils-devel \
+        libarchive-devel \
+        google-benchmark \
+        boost-devel \
+        brotli-devel \
+        openssl-devel \
+        fmt-devel \
+        jemalloc-devel \
+        lz4-devel \
+        xz-devel \
+        libzstd-devel \
+        xxhash-devel \
+        libunwind-devel \
+        libdwarf-devel \
+        flac-devel \
+        utf8cpp-devel \
+        json-devel \
+        range-v3-devel
+RUN pip install mistletoe
+RUN useradd -g users -u 1000 -m mhx
+USER mhx
+ENTRYPOINT /workspace/.docker/build-linux.sh

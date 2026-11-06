@@ -1,0 +1,376 @@
+/* vim:set ts=2 sw=2 sts=2 et: */
+/**
+ * \author     Marcus Holland-Moritz (github@mhxnet.de)
+ * \copyright  Copyright (c) Marcus Holland-Moritz
+ *
+ * This file is part of dwarfs.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the “Software”), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#pragma once
+
+#include <array>
+#include <bit>
+#include <concepts>
+#include <cstddef>
+#include <stdexcept>
+#include <type_traits>
+#include <vector>
+
+#include <dwarfs/container/detail/index_based_iterator.h>
+#include <dwarfs/container/detail/index_based_value_proxy.h>
+#include <dwarfs/container/detail/packed_vector_helpers.h>
+#include <dwarfs/container/packed_int_vector.h>
+
+namespace dwarfs::container {
+
+template <packed_vector_value T, std::size_t SegmentElements = 1024>
+  requires(!std::same_as<T, bool> && std::has_single_bit(SegmentElements))
+class segmented_packed_int_vector {
+ public:
+  using value_type = T;
+  using size_type = std::size_t;
+  using segment_type = auto_packed_int_vector<value_type>;
+  using reference =
+      detail::index_based_value_proxy<segmented_packed_int_vector>;
+  using const_reference = value_type;
+  using iterator = detail::index_based_iterator<segmented_packed_int_vector>;
+  using const_iterator =
+      detail::index_based_const_iterator<segmented_packed_int_vector>;
+
+  using field_descriptor = detail::packed_field_descriptor<value_type>;
+  static constexpr size_type field_count = field_descriptor::field_count;
+
+  static constexpr size_type segment_elements = SegmentElements;
+  static constexpr size_type bits_per_block = segment_type::bits_per_block;
+  static constexpr size_type max_size_value =
+#if defined(__APPLE__) && defined(__clang__) && __clang_major__ < 16
+      segment_type::max_size()
+#else
+      detail::saturating_mul(segment_elements,
+                             std::vector<segment_type>{}.max_size())
+#endif
+      ;
+
+  static constexpr size_type max_size() noexcept { return max_size_value; }
+
+  segmented_packed_int_vector() noexcept = default;
+
+  explicit segmented_packed_int_vector(size_type size) { resize(size); }
+
+  segmented_packed_int_vector(size_type size, value_type value) {
+    resize(size, value);
+  }
+
+  segmented_packed_int_vector(std::initializer_list<value_type> ilist) {
+    resize(ilist.size());
+    size_type i = 0;
+    for (auto const& value : ilist) {
+      set(i++, value);
+    }
+  }
+
+  segmented_packed_int_vector(segmented_packed_int_vector const&) = default;
+  segmented_packed_int_vector(segmented_packed_int_vector&&) noexcept = default;
+  segmented_packed_int_vector&
+  operator=(segmented_packed_int_vector const&) = default;
+  segmented_packed_int_vector&
+  operator=(segmented_packed_int_vector&&) noexcept = default;
+
+  [[nodiscard]] iterator begin() noexcept { return iterator{this, 0}; }
+
+  [[nodiscard]] iterator end() noexcept { return iterator{this, size()}; }
+
+  [[nodiscard]] const_iterator begin() const noexcept {
+    return const_iterator{this, 0};
+  }
+
+  [[nodiscard]] const_iterator end() const noexcept {
+    return const_iterator{this, size()};
+  }
+
+  [[nodiscard]] const_iterator cbegin() const noexcept {
+    return const_iterator{this, 0};
+  }
+
+  [[nodiscard]] const_iterator cend() const noexcept {
+    return const_iterator{this, size()};
+  }
+
+  [[nodiscard]] auto rbegin() noexcept {
+    return std::reverse_iterator<iterator>{end()};
+  }
+
+  [[nodiscard]] auto rend() noexcept {
+    return std::reverse_iterator<iterator>{begin()};
+  }
+
+  [[nodiscard]] auto rbegin() const noexcept {
+    return std::reverse_iterator<const_iterator>{end()};
+  }
+
+  [[nodiscard]] auto rend() const noexcept {
+    return std::reverse_iterator<const_iterator>{begin()};
+  }
+
+  [[nodiscard]] auto crbegin() const noexcept {
+    return std::reverse_iterator<const_iterator>{cend()};
+  }
+
+  [[nodiscard]] auto crend() const noexcept {
+    return std::reverse_iterator<const_iterator>{cbegin()};
+  }
+
+  [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
+  [[nodiscard]] size_type size() const noexcept { return size_; }
+  [[nodiscard]] size_type segment_count() const noexcept {
+    return segments_.size();
+  }
+
+  [[nodiscard]] size_type size_in_bytes() const {
+    size_type total = 0;
+    for (auto const& seg : segments_) {
+      total += seg.size_in_bytes();
+    }
+    return total;
+  }
+
+  [[nodiscard]] auto
+  field_sizes_in_bytes() const -> std::array<size_type, field_count>
+    requires(field_count > 1)
+  {
+    std::array<size_type, field_count> total{};
+
+    for (auto const& seg : segments_) {
+      auto const widths = seg.widths();
+      auto const seg_size = seg.size();
+      for (size_type i = 0; i < field_count; ++i) {
+        total[i] += (widths[i] * seg_size + 7) / 8;
+      }
+    }
+
+    return total;
+  }
+
+  [[nodiscard]] std::array<size_type, bits_per_block + 1>
+  segment_bits_histogram() const {
+    std::array<size_type, bits_per_block + 1> hist{};
+    for (auto const& seg : segments_) {
+      ++hist[seg.bits()];
+    }
+    return hist;
+  }
+
+  void clear() {
+    segments_.clear();
+    size_ = 0;
+  }
+
+  const_reference operator[](size_type i) const { return get(i); }
+
+  reference operator[](size_type i) { return reference{*this, i}; }
+
+  const_reference at(size_type i) const {
+    if (i >= size_) {
+      throw std::out_of_range("segmented_packed_int_vector::at");
+    }
+    return get(i);
+  }
+
+  reference at(size_type i) {
+    if (i >= size_) {
+      throw std::out_of_range("segmented_packed_int_vector::at");
+    }
+    return (*this)[i];
+  }
+
+  const_reference front() const { return get(0); }
+
+  reference front() { return (*this)[0]; }
+
+  const_reference back() const { return get(size_ - 1); }
+
+  reference back() { return (*this)[size_ - 1]; }
+
+  const_reference get(size_type i) const {
+    auto const [seg, off] = locate(i);
+    return segments_[seg][off];
+  }
+
+  void set(size_type i, value_type value) {
+    auto const [seg, off] = locate(i);
+    segments_[seg][off] = value;
+  }
+
+  template <size_type I>
+  [[nodiscard]] auto get_field(size_type i) const ->
+      typename field_descriptor::template field_value_type<I>
+    requires(field_count > 1)
+  {
+    auto const [seg, off] = locate(i);
+    return segments_[seg].template get_field<I>(off);
+  }
+
+  template <size_type I>
+  void set_field(size_type i,
+                 typename field_descriptor::template field_value_type<I> value)
+    requires(field_count > 1)
+  {
+    auto const [seg, off] = locate(i);
+    segments_[seg].template set_field<I>(off, value);
+  }
+
+  void push_back(value_type value) {
+    if (segments_.empty() || segments_.back().size() == segment_elements) {
+      segments_.push_back(make_empty_segment());
+    }
+
+    segments_.back().push_back(value);
+    ++size_;
+  }
+
+  void pop_back() {
+    assert(size_ > 0);
+
+    segments_.back().pop_back();
+    --size_;
+
+    if (segments_.back().empty()) {
+      segments_.pop_back();
+    }
+  }
+
+  void resize(size_type new_size, value_type value = value_type{}) {
+    if (new_size < size_) {
+      shrink_to(new_size);
+    } else if (new_size > size_) {
+      grow_to(new_size, value);
+    }
+  }
+
+  void reserve(size_type) {
+    // no-op, doesn't make sense for this type
+  }
+
+  void shrink_to_fit() {
+    // no-op, doesn't make sense for this type
+  }
+
+  void optimize_storage() {
+    for (auto& seg : segments_) {
+      seg.optimize_storage();
+    }
+    segments_.shrink_to_fit();
+  }
+
+  [[nodiscard]] std::vector<value_type> unpack() const {
+    std::vector<value_type> result(size_);
+    for (size_type i = 0; i < size_; ++i) {
+      result[i] = get(i);
+    }
+    return result;
+  }
+
+  friend bool operator==(segmented_packed_int_vector const& lhs,
+                         segmented_packed_int_vector const& rhs)
+    requires std::equality_comparable<value_type>
+  {
+    return lhs.equals_impl(rhs);
+  }
+
+  template <std::size_t OtherSegmentElements>
+  friend bool operator==(
+      segmented_packed_int_vector const& lhs,
+      segmented_packed_int_vector<value_type, OtherSegmentElements> const& rhs)
+    requires std::equality_comparable<value_type>
+  {
+    return lhs.equals_impl(rhs);
+  }
+
+ private:
+  template <std::size_t OtherSegmentElements>
+  [[nodiscard]] bool equals_impl(
+      segmented_packed_int_vector<value_type, OtherSegmentElements> const&
+          other) const {
+    auto const n = size();
+
+    if (n != other.size()) {
+      return false;
+    }
+
+    for (size_type i = 0; i < n; ++i) {
+      if (get(i) != other.get(i)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  [[nodiscard]] static constexpr std::pair<size_type, size_type>
+  locate(size_type i) noexcept {
+    return {i / segment_elements, i % segment_elements};
+  }
+
+  [[nodiscard]] static segment_type make_empty_segment() {
+    segment_type seg;
+    seg.reserve(segment_elements);
+    return seg;
+  }
+
+  void shrink_to(size_type new_size) {
+    if (new_size == 0) {
+      clear();
+      return;
+    }
+
+    auto const new_segment_count =
+        (new_size + segment_elements - 1) / segment_elements;
+    auto const last_segment_size =
+        new_size - (new_segment_count - 1) * segment_elements;
+
+    segments_.resize(new_segment_count);
+    segments_.back().resize(last_segment_size);
+    size_ = new_size;
+  }
+
+  void grow_to(size_type new_size, value_type value) {
+    while (size_ < new_size) {
+      if (segments_.empty() || segments_.back().size() == segment_elements) {
+        segments_.push_back(make_empty_segment());
+      }
+
+      auto& seg = segments_.back();
+      auto const available = segment_elements - seg.size();
+      auto const remaining = new_size - size_;
+      auto const n = available < remaining ? available : remaining;
+
+      seg.resize(seg.size() + n, value);
+      size_ += n;
+    }
+  }
+
+  size_type size_{0};
+  std::vector<segment_type> segments_;
+};
+
+} // namespace dwarfs::container
