@@ -189,18 +189,6 @@ Write-Step 'Configuring CMake...'
 
 # FUSE driver on Windows needs the WinFsp SDK
 $buildFuse = $false
-if ($ForceFuseDriver) {
-    $buildFuse = $true
-} elseif (-not $NoFuseDriver) {
-    $winfspPath = 'C:\Program Files (x86)\WinFsp'
-    $winfspLib = Join-Path $winfspPath 'lib\winfsp-x64.lib'
-    if (Test-Path $winfspLib) {
-        $buildFuse = $true
-    } else {
-        Write-Host '  WinFsp SDK not found - skipping the dwarfs.exe FUSE driver.'
-        Write-Host '  (Install WinFsp from https://winfsp.dev/ to enable mounting on Windows.)'
-    }
-}
 
 $fuseFlag = 'OFF'
 if ($buildFuse) { $fuseFlag = 'ON' }
