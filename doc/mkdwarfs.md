@@ -250,7 +250,9 @@ Most other options are concerned with compression tuning:
   Journal scan results (and, with `--dedup-global`, the de-duplication index)
   into *path* while the image is being built. If the build is interrupted, it
   can be resumed with `--checkpoint-resume` without re-reading or re-hashing
-  any file data. The directory can be reused for a completely fresh build (the
+  any file data. When `--dedup-global` is enabled, checkpointing is on by
+  default using `<output>.checkpoint` unless `--checkpoint-dir` is given.
+  The directory can be reused for a completely fresh build (the
   stale journal is ignored); a resume is only performed when the journal
   matches the current input and options. The journal is stored as a sidecar
   file and is never embedded in the image, so output compatibility is

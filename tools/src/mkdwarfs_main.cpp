@@ -1335,6 +1335,14 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
   uint64_t checkpoint_inputs_hash{0};
   uint64_t checkpoint_config_hash{0};
 
+  if (checkpoint_dir_str.empty() && !dedup_global.empty() &&
+      dedup_global != "off" && !options.debug_filter_function &&
+      output_str != sys_string("-")) {
+    checkpoint_dir_str = sys_string_to_string(output_str) + ".checkpoint";
+    LOG_INFO << "global de-duplication enabled: defaulting checkpoint directory to '"
+             << checkpoint_dir_str << "'";
+  }
+
   if (checkpoint_dir_str.empty()) {
     if (checkpoint_resume) {
       LOG_ERROR << "--checkpoint-resume requires --checkpoint-dir";
@@ -1403,6 +1411,20 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
 
     checkpoint_inputs_hash = inputs_hash;
     checkpoint_config_hash = config_hash;
+
+    // When checkpointing is on by default (global de-duplication), resume
+    // automatically if a matching journal from an interrupted build exists.
+    if (!checkpoint_resume && !checkpoint_dir_str.empty()) {
+      namespace fs = std::filesystem;
+      auto const phase1_path = options.checkpoint.dir / "phase1.journal";
+      auto const phase2_path = options.checkpoint.dir / "phase2.state";
+      if (std::filesystem::exists(phase1_path) ||
+          std::filesystem::exists(phase2_path)) {
+        checkpoint_resume = true;
+      }
+    }
+
+    options.checkpoint.resume = checkpoint_resume;
 
     if (!dedup_global.empty() && dedup_global != "off") {
       sf_config.global_dedup_persist_dir = options.checkpoint.dir;
