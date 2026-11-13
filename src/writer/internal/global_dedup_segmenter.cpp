@@ -317,6 +317,7 @@ class global_dedup_segmenter_ final : public segmenter::impl {
       }
 
       handle_chunk(chkable, p + start, len);
+      update_progress(len);
       start += len;
     }
   }
@@ -332,6 +333,7 @@ class global_dedup_segmenter_ final : public segmenter::impl {
         scratch_.push_back(b);
         if (cdc_should_cut(params_, cdc.value(), scratch_.size())) {
           handle_chunk(chkable, scratch_.data(), scratch_.size());
+          update_progress(scratch_.size());
           scratch_.clear();
           cdc.clear();
         }
@@ -340,6 +342,7 @@ class global_dedup_segmenter_ final : public segmenter::impl {
 
     if (!scratch_.empty()) {
       handle_chunk(chkable, scratch_.data(), scratch_.size());
+      update_progress(scratch_.size());
     }
   }
 
@@ -719,6 +722,7 @@ class global_dedup_segmenter_ final : public segmenter::impl {
         handle_chunk_with_hash(chkable, p + off, len, h.low64, h.high64);
       }
 
+      update_progress(batch_bytes);
       pos = i;
     }
   }
