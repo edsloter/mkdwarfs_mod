@@ -1858,8 +1858,12 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
 
   if (!hash_batch_bytes_str.empty()) {
     sf_config.hash_batch_bytes = parse_size_with_unit(hash_batch_bytes_str);
-  } else if (sf_config.max_index_memory > 0) {
+  } else if (sf_config.max_index_memory > 0 &&
+             sf_config.max_index_memory < (size_t{256} * 1024 * 1024)) {
     sf_config.hash_batch_bytes = sf_config.max_index_memory;
+  }
+  if (sf_config.hash_batch_bytes == 0) {
+    sf_config.hash_batch_bytes = size_t{256} * 1024 * 1024;
   }
   if (sf_config.hash_batch_bytes > 0) {
     LOG_INFO << "global dedup hash batch size: "
