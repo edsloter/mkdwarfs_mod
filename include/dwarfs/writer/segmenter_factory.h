@@ -68,6 +68,8 @@ class segmenter_factory {
     // Maximum RAM for the global dedup index in bytes (0 = unlimited).
     // When exceeded, entries spill to sorted temporary files on disk.
     size_t max_index_memory{0};
+    // Maximum bytes of chunk data to hash in one parallel batch.
+    size_t hash_batch_bytes{256 * 1024 * 1024};
     // When set, the global dedup index is persisted in this directory so it
     // can be reused on resume.
     std::filesystem::path global_dedup_persist_dir;

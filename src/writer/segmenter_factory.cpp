@@ -121,6 +121,7 @@ class segmenter_factory_ final : public segmenter_factory::impl {
     }
 
     cfg.hash_worker_pool = hash_worker_pool;
+    cfg.hash_batch_bytes = cfg_.hash_batch_bytes;
 
     return cfg;
   }

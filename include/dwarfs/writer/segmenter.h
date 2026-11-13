@@ -95,10 +95,13 @@ class segmenter {
     // Worker pool used to parallelize hashing in global de-duplication
     // mode (batch processing of chunkables).
     std::shared_ptr<thread_pool> hash_worker_pool;
+
+    // Maximum bytes of chunk data to hash in one parallel batch. Larger
+    // values improve parallelism but use more temporary memory.
+    size_t hash_batch_bytes{256 * 1024 * 1024};
   };
 
-  using block_ready_cb =
-      std::function<void(shared_byte_buffer, size_t logical_block_num)>;
+  using block_ready_cb = std::function<void(shared_byte_buffer, size_t logical_block_num)>;
 
   static uint64_t
   estimate_memory_usage(config const& cfg, compression_constraints const& cc);

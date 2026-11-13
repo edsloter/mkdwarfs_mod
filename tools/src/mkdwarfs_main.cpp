@@ -475,7 +475,8 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
   std::vector<std::string> order, max_lookback_blocks, window_size, window_step,
       bloom_filter_size, compression;
   std::string dedup_global, dedup_min_str, dedup_max_str,
-      max_index_memory_str, checkpoint_dir_str, checkpoint_interval_str;
+      max_index_memory_str, checkpoint_dir_str, checkpoint_interval_str,
+      hash_batch_bytes_str;
   size_t num_workers, num_scanner_workers, num_segmenter_workers;
    bool no_progress = false, remove_header = false, no_section_index = false,
        force_overwrite = false, no_history = false, no_sparse_files = false,
@@ -705,6 +706,12 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
         po::value<std::string>(&max_index_memory_str),
         "maximum RAM for the global dedup index (e.g. '4g', '8192m'); "
         "when exceeded, entries spill to disk; 0 = unlimited (default)")
+    ("hash-batch-bytes",
+        po::value<std::string>(&hash_batch_bytes_str),
+        "maximum bytes of chunk data hashed in one parallel batch during "
+        "global de-duplication (e.g. '256m', '1g'); bounds temporary memory "
+        "while preserving multi-threaded hashing (default: 256m, or "
+        "--max-index-memory when set)")
     ("checkpoint-dir",
         po::value<std::string>(&checkpoint_dir_str),
         "directory used to journal scan results and the global dedup index so "
@@ -1847,6 +1854,16 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
                << size_with_unit(sf_config.max_index_memory)
                << " (entries spill to disk when exceeded)";
     }
+  }
+
+  if (!hash_batch_bytes_str.empty()) {
+    sf_config.hash_batch_bytes = parse_size_with_unit(hash_batch_bytes_str);
+  } else if (sf_config.max_index_memory > 0) {
+    sf_config.hash_batch_bytes = sf_config.max_index_memory;
+  }
+  if (sf_config.hash_batch_bytes > 0) {
+    LOG_INFO << "global dedup hash batch size: "
+             << size_with_unit(sf_config.hash_batch_bytes);
   }
 
   block_compressor schema_bc(schema_compression);

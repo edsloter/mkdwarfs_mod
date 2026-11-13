@@ -670,63 +670,99 @@ class global_dedup_segmenter_ final : public segmenter::impl {
     return chunks * sizeof(local_dedup_chunk);
   }
 
+  void process_raw_extent_parallel(chunkable& chkable,
+                                   std::span<std::byte const> data) {
+    auto const* const p = reinterpret_cast<uint8_t const*>(data.data());
+    auto const size = data.size();
+
+    size_t pos = 0;
+    size_t const batch_limit =
+        cfg_.hash_batch_bytes > 0 ? cfg_.hash_batch_bytes : (size_t{1} << 30);
+
+    while (pos < size) {
+      std::vector<std::pair<size_t, size_t>> refs;
+      size_t batch_bytes = 0;
+      size_t i = pos;
+
+      while (i < size) {
+        cdc_hasher cdc;
+        size_t len = size - i;
+        size_t j = i;
+        while (j < size) {
+          cdc.update(p[j]);
+          ++j;
+          if (cdc_should_cut(params_, cdc.value(), j - i)) {
+            len = j - i;
+            break;
+          }
+        }
+        refs.emplace_back(i, len);
+        batch_bytes += len;
+        i += len;
+        if (batch_bytes >= batch_limit) {
+          break;
+        }
+      }
+
+      std::vector<XXH128_hash_t> hashes(refs.size());
+      for (size_t k = 0; k < refs.size(); ++k) {
+        cfg_.hash_worker_pool->add_job([this, &hashes, &refs, p, k] mutable {
+          hashes[k] = XXH3_128bits(p + refs[k].first, refs[k].second);
+        });
+      }
+      cfg_.hash_worker_pool->wait();
+
+      for (size_t k = 0; k < refs.size(); ++k) {
+        auto const off = refs[k].first;
+        auto const len = refs[k].second;
+        auto const h = hashes[k];
+        handle_chunk_with_hash(chkable, p + off, len, h.low64, h.high64);
+      }
+
+      pos = i;
+    }
+  }
+
   void process_batch(
       std::vector<std::unique_ptr<internal::chunkable>>& batch) {
     if (batch.empty()) {
       return;
     }
 
-    auto& hash_worker_pool = cfg_.hash_worker_pool;
-    size_t const num_chunks = batch.size();
-    std::vector<std::vector<local_dedup_chunk>> chunk_hashes(num_chunks);
-
-    for (size_t i = 0; i < num_chunks; ++i) {
-      if (!batch[i]) {
+    for (auto& up : batch) {
+      if (!up) {
         continue;
       }
 
-      if (!chunkable_is_hashable(*batch[i])) {
-        add_chunkable(*batch[i]);
-        batch[i].reset();
-        continue;
-      }
-
-      size_t const budget = index_->max_memory() > 0
-                                ? index_->max_memory()
-                                : (size_t{1} << 30);
-      if (estimated_parallel_chunk_bytes(*batch[i]) > budget) {
-        // The chunk list for this chunkable would exceed the configured
-        // (or default 1 GiB) temporary memory budget, so process it
-        // serially instead of buffering every chunk for parallel hashing.
-        add_chunkable(*batch[i]);
-        batch[i].reset();
-        continue;
-      }
-
-      hash_worker_pool->add_job([this, &batch, &chunk_hashes, i] mutable {
-        chunk_hashes[i] = hash_chunkable(*batch[i]);
-      });
-    }
-
-    hash_worker_pool->wait();
-
-    for (size_t i = 0; i < num_chunks; ++i) {
-      if (!batch[i]) {
-        continue;
-      }
-
-      auto& hashes = chunk_hashes[i];
-      auto& chkable = *batch[i];
+      auto& chkable = *up;
 
       if (!chunkable_is_hashable(chkable)) {
-        // Not eligible for parallel hashing (e.g. holes or non-mapped
-        // extents); process serially.
         add_chunkable(chkable);
-        batch[i].reset();
+        up.reset();
         continue;
       }
 
-      size_t entry_idx = 0;
+      bool has_queued = false;
+      for (auto const& ext : chkable.extents()) {
+        if (cfg_.enable_sparse_files && ext.kind() == extent_kind::hole) {
+          has_queued = true;
+          break;
+        }
+        if (ext.size() == 0) {
+          continue;
+        }
+        if (!ext.supports_raw_bytes()) {
+          has_queued = true;
+          break;
+        }
+      }
+
+      if (has_queued) {
+        add_chunkable(chkable);
+        up.reset();
+        continue;
+      }
+
       for (auto const& ext : chkable.extents()) {
         if (cfg_.enable_sparse_files && ext.kind() == extent_kind::hole) {
           chkable.add_hole(ext.size());
@@ -735,18 +771,11 @@ class global_dedup_segmenter_ final : public segmenter::impl {
         if (ext.size() == 0) {
           continue;
         }
-
+        process_raw_extent_parallel(chkable, ext.raw_bytes());
         update_progress(ext.size());
-
-        while (entry_idx < hashes.size() &&
-               hashes[entry_idx].data_offset + hashes[entry_idx].size <=
-               static_cast<size_t>(ext.size())) {
-          auto const& c = hashes[entry_idx];
-          uint8_t const* data = c.base + c.data_offset;
-          handle_chunk_with_hash(chkable, data, c.size, c.lo, c.hi);
-          ++entry_idx;
-        }
       }
+
+      up.reset();
     }
 
     batch.clear();
