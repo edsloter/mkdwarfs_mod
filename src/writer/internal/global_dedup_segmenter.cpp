@@ -698,7 +698,8 @@ class global_dedup_segmenter_ final : public segmenter::impl {
         update_progress(ext.size());
 
         while (entry_idx < hashes.size() &&
-               hashes[entry_idx].data_offset + hashes[entry_idx].size <= ext.size()) {
+               hashes[entry_idx].data_offset + hashes[entry_idx].size <=
+               static_cast<size_t>(ext.size())) {
           auto const& c = hashes[entry_idx];
           uint8_t const* data = c.base + c.data_offset;
           handle_chunk_with_hash(chkable, data, c.size, c.lo, c.hi);
