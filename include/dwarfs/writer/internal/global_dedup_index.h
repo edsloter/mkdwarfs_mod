@@ -182,6 +182,7 @@ class global_dedup_index {
   }
 
   size_t spill_file_count() const { return spill_files_.size(); }
+  size_t max_memory() const { return max_memory_; }
 
   uint64_t spill_file_disk_bytes() const {
     uint64_t total = 0;

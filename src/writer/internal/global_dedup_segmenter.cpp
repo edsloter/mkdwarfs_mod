@@ -655,6 +655,21 @@ class global_dedup_segmenter_ final : public segmenter::impl {
     process_batch(batch);
   }
 
+  size_t estimated_parallel_chunk_bytes(chunkable& chkable) const {
+    size_t chunks = 0;
+    for (auto const& ext : chkable.extents()) {
+      if (cfg_.enable_sparse_files && ext.kind() == extent_kind::hole) {
+        continue;
+      }
+      if (ext.size() == 0 || !ext.supports_raw_bytes()) {
+        continue;
+      }
+      size_t const min_chunk = params_.min_size > 0 ? params_.min_size : 1;
+      chunks += static_cast<size_t>(ext.size()) / min_chunk + 1;
+    }
+    return chunks * sizeof(local_dedup_chunk);
+  }
+
   void process_batch(
       std::vector<std::unique_ptr<internal::chunkable>>& batch) {
     if (batch.empty()) {
@@ -666,6 +681,28 @@ class global_dedup_segmenter_ final : public segmenter::impl {
     std::vector<std::vector<local_dedup_chunk>> chunk_hashes(num_chunks);
 
     for (size_t i = 0; i < num_chunks; ++i) {
+      if (!batch[i]) {
+        continue;
+      }
+
+      if (!chunkable_is_hashable(*batch[i])) {
+        add_chunkable(*batch[i]);
+        batch[i].reset();
+        continue;
+      }
+
+      size_t const budget = index_->max_memory() > 0
+                                ? index_->max_memory()
+                                : (size_t{1} << 30);
+      if (estimated_parallel_chunk_bytes(*batch[i]) > budget) {
+        // The chunk list for this chunkable would exceed the configured
+        // (or default 1 GiB) temporary memory budget, so process it
+        // serially instead of buffering every chunk for parallel hashing.
+        add_chunkable(*batch[i]);
+        batch[i].reset();
+        continue;
+      }
+
       hash_worker_pool->add_job([this, &batch, &chunk_hashes, i] mutable {
         chunk_hashes[i] = hash_chunkable(*batch[i]);
       });
@@ -674,6 +711,10 @@ class global_dedup_segmenter_ final : public segmenter::impl {
     hash_worker_pool->wait();
 
     for (size_t i = 0; i < num_chunks; ++i) {
+      if (!batch[i]) {
+        continue;
+      }
+
       auto& hashes = chunk_hashes[i];
       auto& chkable = *batch[i];
 
