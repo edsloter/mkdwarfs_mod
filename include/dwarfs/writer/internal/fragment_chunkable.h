@@ -57,7 +57,7 @@ class fragment_chunkable : public chunkable {
   const_inode_handle ino_;
   single_inode_fragment_view frag_;
   file_off_t offset_;
-  file_view const& mm_;
+  file_view mm_;
   categorizer_manager const* catmgr_;
 };
 
