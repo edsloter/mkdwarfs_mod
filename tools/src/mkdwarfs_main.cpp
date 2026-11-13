@@ -1337,7 +1337,7 @@ int mkdwarfs_main(int argc, sys_char** argv, iolayer const& iol) {
 
   if (checkpoint_dir_str.empty() && !dedup_global.empty() &&
       dedup_global != "off" && !options.debug_filter_function &&
-      output_str != sys_string("-")) {
+      sys_string_to_string(output_str) != "-") {
     checkpoint_dir_str = sys_string_to_string(output_str) + ".checkpoint";
     LOG_INFO << "global de-duplication enabled: defaulting checkpoint directory to '"
              << checkpoint_dir_str << "'";
